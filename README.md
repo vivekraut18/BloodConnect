@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Next.js
 
 A modern Next.js 15 application built with TypeScript and Tailwind CSS.
@@ -89,3 +90,7 @@ You can check out the [Next.js GitHub repository](https://github.com/vercel/next
 - Styled with Tailwind CSS
 
 Built with ❤️ on Rocket.new
+=======
+# BloodConnect
+  A blood donation platform connecting donors, requesters, and hospitals
+>>>>>>> f3c5eda9263f510d054c54de585cfed18845a117
