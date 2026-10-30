@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
-import connectDB from '@/lib/db';
-import { Donor, Donation } from '@/models';
 import { getAuthUser } from '@/lib/auth';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { successResponse, errorResponse } from '@/lib/api-response';
 
 export async function GET(req: NextRequest) {
@@ -11,48 +10,56 @@ export async function GET(req: NextRequest) {
       return errorResponse('Unauthorized: Please log in to view donor stats', 401);
     }
 
-    await connectDB();
+    const supabase = await createServerSupabase();
 
-    // Fetch donor profile for logged-in user
-    const donor = await Donor.findOne({ userId: authUser.userId });
+    // 1. Fetch donor profile for logged-in user
+    const { data: donor } = await supabase
+      .from('donor_profiles')
+      .select('*')
+      .eq('user_id', authUser.userId)
+      .maybeSingle();
 
-    // Count actual completed donations from Donation model
-    const completedDonationsCount = await Donation.countDocuments({
-      donorId: authUser.userId,
-      status: 'completed',
-    });
+    // 2. Count actual completed donations from donations table
+    const { count: completedCount } = await supabase
+      .from('donations')
+      .select('*', { count: 'exact', head: true })
+      .eq('donor_id', authUser.userId)
+      .eq('status', 'completed');
 
-    // Use higher of actual donations count or donor.donationsCompleted (for seeded demo donors)
-    const totalDonations = Math.max(
-      completedDonationsCount,
-      donor?.donationsCompleted || 0
-    );
+    const totalDonations = Math.max(completedCount || 0, donor?.donations_completed || 0);
 
     const livesImpacted = totalDonations * 3;
 
-    // Find the latest donation date
-    let lastDonationDate: Date | null = donor?.lastDonationDate || null;
-    const latestDonation = await Donation.findOne({
-      donorId: authUser.userId,
-      status: 'completed',
-    }).sort({ date: -1 });
+    // 3. Find latest completed donation
+    let lastDonationDate: Date | null = donor?.last_donation_date
+      ? new Date(donor.last_donation_date)
+      : null;
+
+    const { data: latestDonation } = await supabase
+      .from('donations')
+      .select('date')
+      .eq('donor_id', authUser.userId)
+      .eq('status', 'completed')
+      .order('date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (latestDonation?.date) {
-      if (!lastDonationDate || new Date(latestDonation.date) > new Date(lastDonationDate)) {
-        lastDonationDate = new Date(latestDonation.date);
+      const latestDate = new Date(latestDonation.date);
+      if (!lastDonationDate || latestDate > lastDonationDate) {
+        lastDonationDate = latestDate;
       }
     }
 
-    // nextEligibleDate = last donation + 90 days (or today if never donated)
+    // 4. Calculate next eligible donation date (+90 days)
     let nextEligibleDate: string;
     if (lastDonationDate) {
-      const eligible = new Date(new Date(lastDonationDate).getTime() + 90 * 24 * 60 * 60 * 1000);
+      const eligible = new Date(lastDonationDate.getTime() + 90 * 24 * 60 * 60 * 1000);
       nextEligibleDate = eligible.toISOString();
     } else {
       nextEligibleDate = new Date().toISOString();
     }
 
-    // Calculate donation streak (e.g. donations in recent quarters)
     const currentStreak = totalDonations > 0 ? Math.min(totalDonations, 4) : 0;
 
     return successResponse(
@@ -61,8 +68,8 @@ export async function GET(req: NextRequest) {
         livesImpacted,
         nextEligibleDate,
         currentStreak,
-        bloodGroup: donor?.bloodGroup || 'O+',
-        availabilityStatus: donor?.availabilityStatus || 'available',
+        bloodGroup: donor?.blood_group || 'O+',
+        availabilityStatus: donor?.availability_status || 'available',
         lastDonationDate: lastDonationDate ? lastDonationDate.toISOString() : null,
       },
       'Donor statistics fetched successfully',

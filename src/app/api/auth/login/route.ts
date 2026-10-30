@@ -1,14 +1,12 @@
 import { NextRequest } from 'next/server';
-import connectDB from '@/lib/db';
-import { User } from '@/models';
-import { comparePassword, signAuthToken, getAuthCookieOptions } from '@/lib/auth';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { loginSchema } from '@/lib/validations';
 import { successResponse, errorResponse } from '@/lib/api-response';
 import { checkRateLimit } from '@/lib/rate-limit';
 
 export async function POST(req: NextRequest) {
   try {
-    // Rate limit: 5 attempts per IP per 10 minutes to protect against brute-force & credential stuffing
+    // Rate limit: 5 attempts per IP per 10 minutes to protect against brute-force
     const rateLimit = checkRateLimit(req, 'auth_login', 5, 10 * 60 * 1000);
     if (!rateLimit.allowed) {
       const waitMinutes = Math.ceil((rateLimit.resetTime - Date.now()) / (60 * 1000));
@@ -17,8 +15,6 @@ export async function POST(req: NextRequest) {
         429
       );
     }
-
-    await connectDB();
 
     const body = await req.json().catch(() => null);
     if (!body) {
@@ -34,37 +30,43 @@ export async function POST(req: NextRequest) {
     const { email, password } = validation.data;
     const lowerEmail = email.toLowerCase().trim();
 
-    // Query user including passwordHash
-    const user = await User.findOne({ email: lowerEmail }).select('+passwordHash');
-    if (!user) {
-      return errorResponse('Invalid email or password', 401);
-    }
-
-    // Verify password
-    const isMatch = await comparePassword(password, user.passwordHash);
-    if (!isMatch) {
-      return errorResponse('Invalid email or password', 401);
-    }
-
-    // Sign JWT
-    const token = signAuthToken({
-      userId: user._id.toString(),
-      role: user.role,
+    // Sign in via Supabase Auth
+    const supabaseServer = await createServerSupabase();
+    const { data: authData, error: authError } = await supabaseServer.auth.signInWithPassword({
+      email: lowerEmail,
+      password,
     });
 
-    // Build response with httpOnly cookie
-    const response = successResponse(
-      { role: user.role },
-      'Login successful',
-      200
-    );
+    if (authError || !authData.user) {
+      // Surface actionable messages from Supabase (e.g. "Email not confirmed")
+      // while keeping credential errors generic to prevent account enumeration.
+      const lowerMsg = (authError?.message || '').toLowerCase();
+      let userMessage = 'Invalid email or password';
 
-    const cookieOptions = getAuthCookieOptions();
-    response.cookies.set(cookieOptions.name, token, cookieOptions);
+      if (lowerMsg.includes('email not confirmed')) {
+        userMessage = 'Please verify your email address before signing in. Check your inbox for a confirmation link.';
+      } else if (lowerMsg.includes('too many requests')) {
+        userMessage = 'Too many sign-in attempts. Please wait a moment and try again.';
+      }
 
-    return response;
-  } catch (error: any) {
+      return errorResponse(userMessage, 401);
+    }
+
+    const { data: profile, error: profileError } = await supabaseServer
+      .from('profiles')
+      .select('role')
+      .eq('id', authData.user.id)
+      .single();
+
+    if (profileError || !profile) {
+      console.error('Login profile lookup failed:', profileError);
+      await supabaseServer.auth.signOut();
+      return errorResponse('User profile not found', 500);
+    }
+
+    return successResponse({ role: profile.role }, 'Login successful', 200);
+  } catch (error) {
     console.error('Login error:', error);
-    return errorResponse(error.message || 'Internal server error', 500);
+    return errorResponse('Unable to sign in right now. Please try again.', 500);
   }
 }

@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
-import { Search, MapPin, Locate, SlidersHorizontal, Zap, Loader2, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
+import { Search, MapPin, Locate, SlidersHorizontal, Zap, Loader2, RefreshCw, Map as MapIcon } from 'lucide-react';
 import { BLOOD_GROUPS, SEARCH_RADIUS_OPTIONS } from '@/lib/constants';
 import { SearchState } from './FindBloodSearch';
 
@@ -19,6 +20,19 @@ export default function SearchFiltersBar({ initialState, onSearch, isSearching }
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSearch(local);
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          update({ location: `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}` });
+        },
+        () => {
+          update({ location: 'Mumbai' });
+        }
+      );
+    }
   };
 
   return (
@@ -68,6 +82,7 @@ export default function SearchFiltersBar({ initialState, onSearch, isSearching }
             />
             <button
               type="button"
+              onClick={handleUseCurrentLocation}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
               title="Use my current location"
               aria-label="Use current location"
@@ -95,7 +110,7 @@ export default function SearchFiltersBar({ initialState, onSearch, isSearching }
       </div>
 
       {/* Advanced filters toggle */}
-      <div>
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <button
           type="button"
           onClick={() => setShowAdvanced((p) => !p)}
@@ -105,63 +120,71 @@ export default function SearchFiltersBar({ initialState, onSearch, isSearching }
           {showAdvanced ? 'Hide' : 'Show'} advanced filters
         </button>
 
-        {showAdvanced && (
-          <div className="mt-3 pt-3 border-t border-border grid grid-cols-1 sm:grid-cols-2 gap-4 fade-in">
-            {/* Emergency toggle */}
-            <label className="flex items-start gap-3 cursor-pointer">
-              <div
-                onClick={() => update({ isEmergency: !local.isEmergency })}
-                className={`relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0 mt-0.5 cursor-pointer ${
-                  local.isEmergency ? 'bg-emergency' : 'bg-border'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
-                    local.isEmergency ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground flex items-center gap-1">
-                  <Zap size={13} className="text-emergency" />
-                  Emergency Mode
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Prioritizes results by urgency. Notifies matched donors immediately.
-                </p>
-              </div>
-            </label>
-
-            {/* Show compatible */}
-            <label className="flex items-start gap-3 cursor-pointer">
-              <div
-                onClick={() => update({ showCompatible: !local.showCompatible })}
-                className={`relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0 mt-0.5 cursor-pointer ${
-                  local.showCompatible ? 'bg-primary' : 'bg-border'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
-                    local.showCompatible ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Show Compatible Types</p>
-                <p className="text-xs text-muted-foreground">
-                  Include compatible blood groups (e.g. O- for any request). Verify with hospital.
-                </p>
-              </div>
-            </label>
-          </div>
-        )}
+        <Link
+          href="/nearby-facilities"
+          className="flex items-center gap-1.5 text-xs text-primary font-semibold hover:underline"
+        >
+          <MapIcon size={14} />
+          View Interactive Facilities Map
+        </Link>
       </div>
 
+      {showAdvanced && (
+        <div className="mt-3 pt-3 border-t border-border grid grid-cols-1 sm:grid-cols-2 gap-4 fade-in">
+          {/* Emergency toggle */}
+          <label className="flex items-start gap-3 cursor-pointer">
+            <div
+              onClick={() => update({ isEmergency: !local.isEmergency })}
+              className={`relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0 mt-0.5 cursor-pointer ${
+                local.isEmergency ? 'bg-emergency' : 'bg-border'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
+                  local.isEmergency ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground flex items-center gap-1">
+                <Zap size={13} className="text-emergency" />
+                Emergency Mode
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Prioritizes urgent results and matches available emergency facilities.
+              </p>
+            </div>
+          </label>
+
+          {/* Show compatible */}
+          <label className="flex items-start gap-3 cursor-pointer">
+            <div
+              onClick={() => update({ showCompatible: !local.showCompatible })}
+              className={`relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0 mt-0.5 cursor-pointer ${
+                local.showCompatible ? 'bg-primary' : 'bg-border'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
+                  local.showCompatible ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Show Compatible Types</p>
+              <p className="text-xs text-muted-foreground">
+                Include compatible blood groups (e.g. O- for any request).
+              </p>
+            </div>
+          </label>
+        </div>
+      )}
+
       {/* Action row */}
-      <div className="flex items-center gap-3 pt-1 border-t border-border">
+      <div className="flex items-center gap-3 pt-1 border-t border-border flex-wrap">
         <button
           type="submit"
-          disabled={isSearching || !local.bloodGroup}
+          disabled={isSearching}
           className="btn-primary flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {isSearching ? (
@@ -187,15 +210,13 @@ export default function SearchFiltersBar({ initialState, onSearch, isSearching }
               showCompatible: false,
             };
             setLocal(reset);
+            onSearch(reset);
           }}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
         >
           <RefreshCw size={13} />
           Reset
         </button>
-        {!local.bloodGroup && (
-          <p className="text-xs text-muted-foreground">Select a blood group to search</p>
-        )}
       </div>
     </form>
   );

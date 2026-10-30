@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import { ProfileProvider } from './ProfileContext';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -9,6 +10,16 @@ interface AppLayoutProps {
 }
 
 export default function AppLayout({ children, activeRoute }: AppLayoutProps) {
+  return (
+    <ProfileProvider>
+      <AppLayoutInner activeRoute={activeRoute}>
+        {children}
+      </AppLayoutInner>
+    </ProfileProvider>
+  );
+}
+
+function AppLayoutInner({ children, activeRoute }: AppLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 

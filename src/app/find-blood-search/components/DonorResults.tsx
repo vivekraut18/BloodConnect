@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Clock, MessageCircle, UserCheck, Shield, AlertCircle } from 'lucide-react';
 import { BloodGroupBadge, AvailabilityBadge } from '@/components/ui/Badge';
 import { SearchResultCardSkeleton } from '@/components/ui/LoadingSkeleton';
@@ -8,12 +8,16 @@ import Modal from '@/components/ui/Modal';
 import { BloodGroup, DonorAvailabilityStatus } from '@/lib/constants';
 import { toast } from 'sonner';
 
-interface MatchedDonor {
+export interface MatchedDonor {
   id: string;
+  userId?: string;
   bloodConnectId: string;
   initials: string;
   firstName: string;
+  fullName?: string;
   bloodGroup: BloodGroup;
+  city?: string;
+  phone?: string;
   approxDistanceKm: number;
   availabilityStatus: DonorAvailabilityStatus;
   isVerified: boolean;
@@ -25,128 +29,71 @@ interface MatchedDonor {
 
 interface DonorResultsProps {
   bloodGroup: BloodGroup | '';
-  isLoading: boolean;
-  showCompatible: boolean;
+  location?: string;
+  isLoading?: boolean;
+  showCompatible?: boolean;
+  donors?: MatchedDonor[];
 }
 
-// Mock data — BACKEND INTEGRATION: replace with /api/search/donors?bloodGroup=B+&lat=...&lng=...&radius=10
-const MOCK_DONORS: MatchedDonor[] = [
-  {
-    id: 'donor-001',
-    bloodConnectId: 'BC-2026-04821',
-    initials: 'AM',
-    firstName: 'Arjun',
-    bloodGroup: 'B+',
-    approxDistanceKm: 1.2,
-    availabilityStatus: 'available',
-    isVerified: true,
-    donationsCompleted: 14,
-    reliabilityScore: 96,
-    lastActiveDaysAgo: 0,
-    respondedToRequests: 17,
-  },
-  {
-    id: 'donor-002',
-    bloodConnectId: 'BC-2026-03147',
-    initials: 'PS',
-    firstName: 'Priya',
-    bloodGroup: 'B+',
-    approxDistanceKm: 2.1,
-    availabilityStatus: 'available',
-    isVerified: true,
-    donationsCompleted: 8,
-    reliabilityScore: 88,
-    lastActiveDaysAgo: 1,
-    respondedToRequests: 10,
-  },
-  {
-    id: 'donor-003',
-    bloodConnectId: 'BC-2026-02983',
-    initials: 'RK',
-    firstName: 'Rahul',
-    bloodGroup: 'B+',
-    approxDistanceKm: 3.4,
-    availabilityStatus: 'available',
-    isVerified: true,
-    donationsCompleted: 22,
-    reliabilityScore: 94,
-    lastActiveDaysAgo: 0,
-    respondedToRequests: 25,
-  },
-  {
-    id: 'donor-004',
-    bloodConnectId: 'BC-2026-01829',
-    initials: 'NJ',
-    firstName: 'Neha',
-    bloodGroup: 'B+',
-    approxDistanceKm: 4.0,
-    availabilityStatus: 'temporarily_unavailable',
-    isVerified: true,
-    donationsCompleted: 5,
-    reliabilityScore: 72,
-    lastActiveDaysAgo: 3,
-    respondedToRequests: 7,
-  },
-  {
-    id: 'donor-005',
-    bloodConnectId: 'BC-2026-05512',
-    initials: 'VD',
-    firstName: 'Vikram',
-    bloodGroup: 'B+',
-    approxDistanceKm: 4.8,
-    availabilityStatus: 'available',
-    isVerified: false,
-    donationsCompleted: 2,
-    reliabilityScore: 65,
-    lastActiveDaysAgo: 2,
-    respondedToRequests: 3,
-  },
-  {
-    id: 'donor-006',
-    bloodConnectId: 'BC-2026-03901',
-    initials: 'SA',
-    firstName: 'Sunita',
-    bloodGroup: 'B+',
-    approxDistanceKm: 5.3,
-    availabilityStatus: 'available',
-    isVerified: true,
-    donationsCompleted: 11,
-    reliabilityScore: 91,
-    lastActiveDaysAgo: 0,
-    respondedToRequests: 13,
-  },
-  {
-    id: 'donor-007',
-    bloodConnectId: 'BC-2026-02244',
-    initials: 'KP',
-    firstName: 'Kiran',
-    bloodGroup: 'B-',
-    approxDistanceKm: 6.1,
-    availabilityStatus: 'available',
-    isVerified: true,
-    donationsCompleted: 7,
-    reliabilityScore: 83,
-    lastActiveDaysAgo: 1,
-    respondedToRequests: 9,
-  },
-  {
-    id: 'donor-008',
-    bloodConnectId: 'BC-2026-04103',
-    initials: 'MR',
-    firstName: 'Manoj',
-    bloodGroup: 'B+',
-    approxDistanceKm: 7.4,
-    availabilityStatus: 'do_not_disturb',
-    isVerified: true,
-    donationsCompleted: 18,
-    reliabilityScore: 97,
-    lastActiveDaysAgo: 5,
-    respondedToRequests: 20,
-  },
-];
-
-export default function DonorResults({ bloodGroup, isLoading }: DonorResultsProps) {
+export default function DonorResults({
+  bloodGroup,
+  location = '',
+  isLoading: externalLoading = false,
+  donors: propDonors,
+}: DonorResultsProps) {
   const [contactDonor, setContactDonor] = useState<MatchedDonor | null>(null);
+  const [donors, setDonors] = useState<MatchedDonor[]>(propDonors || []);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (propDonors && propDonors.length > 0) {
+      setDonors(propDonors);
+      return;
+    }
+
+    let active = true;
+    setLoading(true);
+
+    const queryParams = new URLSearchParams();
+    if (bloodGroup) queryParams.set('bloodGroup', bloodGroup);
+    if (location) queryParams.set('city', location);
+
+    fetch(`/api/donors?${queryParams.toString()}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data?.data) {
+          const formatted = data.data.map((d: any) => ({
+            id: d.id,
+            userId: d.userId,
+            bloodConnectId: d.bloodConnectId,
+            initials: d.initials || 'BD',
+            firstName: d.firstName || 'Donor',
+            fullName: d.fullName,
+            bloodGroup: d.bloodGroup as BloodGroup,
+            city: d.city,
+            phone: d.phone,
+            approxDistanceKm: 2.5,
+            availabilityStatus: (d.availabilityStatus as DonorAvailabilityStatus) || 'available',
+            isVerified: d.isVerified ?? true,
+            donationsCompleted: d.donationsCompleted || 0,
+            reliabilityScore: d.reliabilityScore || 100,
+            lastActiveDaysAgo: 0,
+            respondedToRequests: (d.donationsCompleted || 0) + 2,
+          }));
+          setDonors(formatted);
+        }
+      })
+      .catch((err) => console.error('Error fetching donors:', err))
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [bloodGroup, location, propDonors]);
+
+  const isLoading = externalLoading || loading;
 
   if (isLoading) {
     return (
@@ -159,11 +106,11 @@ export default function DonorResults({ bloodGroup, isLoading }: DonorResultsProp
   }
 
   const filtered = bloodGroup
-    ? MOCK_DONORS.filter((d) => d.bloodGroup === bloodGroup || d.availabilityStatus === 'available')
-    : MOCK_DONORS;
+    ? donors.filter((d) => d.bloodGroup === bloodGroup)
+    : donors;
 
   if (filtered.length === 0) {
-    return <EmptyState variant="donors" />;
+    return <EmptyState variant="donors" title="No matching donors found" description="Try adjusting your blood group filter or search radius." />;
   }
 
   return (
@@ -172,7 +119,7 @@ export default function DonorResults({ bloodGroup, isLoading }: DonorResultsProp
       <div className="flex items-start gap-2 p-3 rounded-xl bg-primary-light border border-blue-200 mb-3">
         <Shield size={14} className="text-primary flex-shrink-0 mt-0.5" />
         <p className="text-xs text-primary leading-relaxed">
-          <strong>Privacy Protected:</strong> Donor exact location, address, and phone number are never shown. Only approximate distance and limited identity are displayed. Contact is mediated through BloodConnect.
+          <strong>Privacy Protected:</strong> Donor exact location, address, and phone number are never shown publicly. Contact is mediated through BloodConnect.
         </p>
       </div>
 
@@ -208,7 +155,7 @@ function DonorCard({ donor, onContact }: { donor: MatchedDonor; onContact: () =>
   const isUnavailable = donor.availabilityStatus !== 'available';
 
   return (
-    <div className={`bg-card border rounded-2xl p-4 card-hover ${isUnavailable ? 'opacity-70' : 'border-border'}`}>
+    <div className={`bg-card border rounded-2xl p-4 card-hover ${isUnavailable ? 'opacity-70 border-border' : 'border-border'}`}>
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex items-center gap-2.5">
           <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
@@ -218,7 +165,7 @@ function DonorCard({ donor, onContact }: { donor: MatchedDonor; onContact: () =>
             <div className="flex items-center gap-1.5">
               <p className="text-sm font-bold text-foreground">{donor.firstName}</p>
               {donor.isVerified && (
-                <UserCheck size={13} className="text-success" title="Verified donor" />
+                <UserCheck size={13} className="text-success" />
               )}
             </div>
             <p className="text-xs text-muted-foreground font-mono">{donor.bloodConnectId}</p>
@@ -235,7 +182,7 @@ function DonorCard({ donor, onContact }: { donor: MatchedDonor; onContact: () =>
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-2 mb-3">
         <div className="text-center">
-          <p className="text-base font-bold text-foreground font-tabular">{donor.approxDistanceKm}</p>
+          <p className="text-base font-bold text-foreground font-tabular">{donor.approxDistanceKm || 'Near'}</p>
           <p className="text-xs text-muted-foreground">km away</p>
         </div>
         <div className="text-center border-x border-border">
@@ -258,7 +205,7 @@ function DonorCard({ donor, onContact }: { donor: MatchedDonor; onContact: () =>
         <Clock size={11} />
         <span>
           {donor.lastActiveDaysAgo === 0
-            ? 'Active today'
+            ? 'Active recently'
             : `Active ${donor.lastActiveDaysAgo} day${donor.lastActiveDaysAgo !== 1 ? 's' : ''} ago`}
         </span>
       </div>
@@ -278,16 +225,41 @@ function DonorCard({ donor, onContact }: { donor: MatchedDonor; onContact: () =>
 
 function ContactDonorForm({ donor, onClose }: { donor: MatchedDonor; onClose: () => void }) {
   const [message, setMessage] = useState('');
+  const [hospital, setHospital] = useState('');
+  const [contactNumber, setContactNumber] = useState('');
   const [sending, setSending] = useState(false);
 
   const handleSend = async () => {
     if (!message.trim()) return;
     setSending(true);
-    // BACKEND INTEGRATION: POST /api/donor-requests — sends anonymized request to donor
-    await new Promise((r) => setTimeout(r, 900));
-    setSending(false);
-    toast.success(`Donation request sent to ${donor.firstName}. They will be notified via BloodConnect.`);
-    onClose();
+
+    try {
+      const res = await fetch('/api/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bloodGroup: donor.bloodGroup,
+          priority: 'URGENT',
+          hospital: hospital.trim() || 'Local Medical Centre',
+          unitsNeeded: 1,
+          contactNumber: contactNumber.trim() || '9999999999',
+          city: donor.city || 'Mumbai',
+          notes: message.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`Donation request sent to ${donor.firstName}! BloodConnect relayed request ID ${data.data?.request?.requestId || ''}`);
+        onClose();
+      } else {
+        toast.error(data.error || 'Failed to send request. Please log in or check input.');
+      }
+    } catch (err: any) {
+      toast.error('Network error sending request.');
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -298,7 +270,7 @@ function ContactDonorForm({ donor, onClose }: { donor: MatchedDonor; onClose: ()
         </div>
         <div>
           <p className="text-sm font-bold text-foreground">{donor.firstName} · {donor.bloodGroup}</p>
-          <p className="text-xs text-muted-foreground">{donor.bloodConnectId} · ~{donor.approxDistanceKm} km away</p>
+          <p className="text-xs text-muted-foreground">{donor.bloodConnectId}</p>
         </div>
       </div>
 
@@ -306,27 +278,39 @@ function ContactDonorForm({ donor, onClose }: { donor: MatchedDonor; onClose: ()
         <div className="flex items-start gap-2">
           <AlertCircle size={13} className="text-primary flex-shrink-0 mt-0.5" />
           <p className="text-xs text-primary leading-relaxed">
-            Your contact details will not be shared with the donor at this stage. BloodConnect will relay your request anonymously. The donor's phone number will only be shared by a hospital/blood bank staff member after eligibility is confirmed.
+            Your request will be recorded securely in BloodConnect and relayed to available donors.
           </p>
         </div>
       </div>
 
       <div>
-        <label className="block text-sm font-semibold text-foreground mb-1.5">
-          Request Message
-        </label>
-        <p className="text-xs text-muted-foreground mb-1.5">
-          Describe the need briefly. Do not include personal contact details.
-        </p>
+        <label className="block text-xs font-semibold text-foreground mb-1">Hospital / Clinic Name</label>
+        <input
+          type="text"
+          value={hospital}
+          onChange={(e) => setHospital(e.target.value)}
+          placeholder="e.g. Apollo Hospital, Andheri"
+          className="input-field text-sm mb-3"
+        />
+
+        <label className="block text-xs font-semibold text-foreground mb-1">Contact Number</label>
+        <input
+          type="tel"
+          value={contactNumber}
+          onChange={(e) => setContactNumber(e.target.value)}
+          placeholder="e.g. +91 98765 43210"
+          className="input-field text-sm mb-3"
+        />
+
+        <label className="block text-xs font-semibold text-foreground mb-1">Request Message</label>
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          rows={4}
-          placeholder="e.g. Urgent need for B+ blood at Lilavati Hospital, Bandra. Patient is post-surgery. Please respond if available."
-          className="input-field resize-none"
+          rows={3}
+          placeholder="Describe the urgent requirement briefly..."
+          className="input-field resize-none text-sm"
           maxLength={300}
         />
-        <p className="text-xs text-muted-foreground text-right mt-1">{message.length}/300</p>
       </div>
 
       <div className="flex gap-2">

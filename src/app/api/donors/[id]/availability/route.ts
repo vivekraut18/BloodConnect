@@ -1,25 +1,19 @@
 import { NextRequest } from 'next/server';
-import mongoose from 'mongoose';
-import connectDB from '@/lib/db';
-import { Donor } from '@/models';
 import { getAuthUser } from '@/lib/auth';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { updateAvailabilitySchema } from '@/lib/validations';
 import { successResponse, errorResponse } from '@/lib/api-response';
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const authUser = await getAuthUser(req);
     if (!authUser) {
       return errorResponse('Unauthorized: Please log in', 401);
     }
 
-    await connectDB();
     const { id } = await params;
-
     const body = await req.json().catch(() => null);
+
     if (!body) {
       return errorResponse('Invalid JSON body', 400);
     }
@@ -31,41 +25,60 @@ export async function PUT(
     }
 
     const { availabilityStatus } = validation.data;
+    const supabase = await createServerSupabase();
 
     let targetDonor = null;
 
     if (id === 'me') {
-      targetDonor = await Donor.findOne({ userId: authUser.userId });
-    } else if (mongoose.isValidObjectId(id)) {
-      targetDonor = await Donor.findById(id);
-      if (!targetDonor) {
-        targetDonor = await Donor.findOne({ userId: id });
+      const { data } = await supabase
+        .from('donor_profiles')
+        .select('*')
+        .eq('user_id', authUser.userId)
+        .maybeSingle();
+      targetDonor = data;
+    } else {
+      let { data } = await supabase.from('donor_profiles').select('*').eq('id', id).maybeSingle();
+
+      if (!data) {
+        const { data: dataByUserId } = await supabase
+          .from('donor_profiles')
+          .select('*')
+          .eq('user_id', id)
+          .maybeSingle();
+        data = dataByUserId;
       }
+      targetDonor = data;
     }
 
     if (!targetDonor) {
       return errorResponse('Donor record not found', 404);
     }
 
-    // Security check: only the donor or an admin can change availability
-    if (
-      targetDonor.userId.toString() !== authUser.userId &&
-      authUser.role !== 'admin'
-    ) {
+    // Security check: only the donor themselves or an admin can change availability
+    if (targetDonor.user_id !== authUser.userId && authUser.role !== 'admin') {
       return errorResponse('Forbidden: You can only update your own availability', 403);
     }
 
-    targetDonor.availabilityStatus = availabilityStatus;
-    await targetDonor.save();
+    const { data: updatedDonor, error: updateErr } = await supabase
+      .from('donor_profiles')
+      .update({ availability_status: availabilityStatus })
+      .eq('id', targetDonor.id)
+      .select()
+      .single();
+
+    if (updateErr || !updatedDonor) {
+      console.error('Update availability error:', updateErr);
+      return errorResponse('Failed to update availability status', 500);
+    }
 
     return successResponse(
       {
-        id: targetDonor._id.toString(),
-        userId: targetDonor.userId.toString(),
-        bloodGroup: targetDonor.bloodGroup,
-        availabilityStatus: targetDonor.availabilityStatus,
-        lastDonationDate: targetDonor.lastDonationDate,
-        updatedAt: targetDonor.updatedAt,
+        id: updatedDonor.id,
+        userId: updatedDonor.user_id,
+        bloodGroup: updatedDonor.blood_group,
+        availabilityStatus: updatedDonor.availability_status,
+        lastDonationDate: updatedDonor.last_donation_date,
+        updatedAt: updatedDonor.updated_at,
       },
       'Availability status updated successfully',
       200

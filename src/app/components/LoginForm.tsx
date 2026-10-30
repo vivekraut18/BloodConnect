@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, LogIn, Loader2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { createClient } from '@/lib/supabase/client';
 
 interface LoginFormData {
   email: string;
@@ -15,15 +16,19 @@ interface LoginFormProps {
   onSwitchToRegister: () => void;
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function LoginForm({ onSwitchToRegister }: LoginFormProps) {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [serverError, setServerError] = useState('');
 
   const {
     register,
     handleSubmit,
+    getValues,
     formState: { errors },
   } = useForm<LoginFormData>({
     defaultValues: { rememberMe: false },
@@ -65,6 +70,44 @@ export default function LoginForm({ onSwitchToRegister }: LoginFormProps) {
     }
   };
 
+  const handleForgotPassword = async () => {
+    const email = getValues('email')?.trim();
+
+    if (!email) {
+      toast.error('Please enter your email address above before resetting your password.');
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(email)) {
+      toast.error('Please enter a valid email address before resetting your password.');
+      return;
+    }
+
+    setIsResetting(true);
+
+    try {
+      const supabase = createClient();
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
+      });
+
+      if (error) {
+        toast.error(error.message || 'Unable to send reset email. Please try again.');
+      } else {
+        // Always show the same message for security — don't reveal if the account exists
+        toast.success(
+          'If an account exists with that email, a password reset link has been sent. Please check your inbox.'
+        );
+      }
+    } catch {
+      toast.error('Something went wrong. Please try again later.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} noValidate className="fade-in">
       <div className="mb-6">
@@ -93,7 +136,10 @@ export default function LoginForm({ onSwitchToRegister }: LoginFormProps) {
           className={`input-field ${errors.email ? 'error' : ''}`}
           {...register('email', {
             required: 'Email is required',
-            pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email address' },
+            pattern: {
+              value: EMAIL_REGEX,
+              message: 'Enter a valid email address',
+            },
           })}
         />
         {errors.email && (
@@ -110,8 +156,13 @@ export default function LoginForm({ onSwitchToRegister }: LoginFormProps) {
           <label htmlFor="login-password" className="text-sm font-semibold text-foreground">
             Password
           </label>
-          <button type="button" className="text-xs text-primary font-semibold hover:underline">
-            Forgot password?
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={isResetting}
+            className="text-xs text-primary font-semibold hover:underline disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isResetting ? 'Sending…' : 'Forgot password?'}
           </button>
         </div>
         <div className="relative">
@@ -178,16 +229,21 @@ export default function LoginForm({ onSwitchToRegister }: LoginFormProps) {
 
       <p className="text-center text-sm text-muted-foreground mt-4">
         Don&apos;t have an account?{' '}
-        <button type="button" onClick={onSwitchToRegister} className="text-primary font-semibold hover:underline">
+        <button
+          type="button"
+          onClick={onSwitchToRegister}
+          className="text-primary font-semibold hover:underline"
+        >
           Create one
         </button>
       </p>
 
-
       {/* Medical disclaimer */}
       <div className="mt-4 p-3 rounded-xl bg-warning-bg border border-amber-200">
         <p className="text-xs text-warning leading-relaxed">
-          <strong>Medical Disclaimer:</strong> BloodConnect does not provide medical advice. All blood compatibility and donor eligibility decisions must be confirmed by qualified medical staff. Emergency? Call 112.
+          <strong>Medical Disclaimer:</strong> BloodConnect does not provide medical advice. All
+          blood compatibility and donor eligibility decisions must be confirmed by qualified medical
+          staff. Emergency? Call 112.
         </p>
       </div>
     </form>

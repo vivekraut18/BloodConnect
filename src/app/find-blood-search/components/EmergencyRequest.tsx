@@ -97,6 +97,7 @@ function EmergencyForm({
   onSuccess: (id: string) => void;
 }) {
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -109,19 +110,75 @@ function EmergencyForm({
     },
   });
 
-  const onSubmit = async (_data: EmergencyFormData) => {
+  const onSubmit = async (data: EmergencyFormData) => {
     setIsLoading(true);
-    // BACKEND INTEGRATION: POST /api/blood-requests — rate-limited, server-side validation, generates BL-YYYY-XXXXX ID
-    await new Promise((r) => setTimeout(r, 1500));
-    const year = new Date().getFullYear();
-    const mockId = `BL-${year}-${String(Math.floor(40000 + 9999 * 0.7321)).padStart(5, '0')}`;
-    setIsLoading(false);
-    toast.success(`Emergency request ${mockId} created. Matching donors notified.`);
-    onSuccess(mockId);
+    setErrorMessage(null);
+    try {
+      const res = await fetch('/api/requests', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bloodGroup: data.bloodGroup,
+          priority: 'EMERGENCY',
+          hospital: data.hospitalName,
+          unitsNeeded: Number(data.unitsRequired),
+          contactNumber: data.contactPhone,
+          city: data.hospitalAddress || undefined,
+          patientName: data.patientName || data.contactName || undefined,
+          notes: [
+            data.additionalNotes,
+            data.requiredBy ? `Required by: ${data.requiredBy}` : '',
+            data.contactName ? `Contact: ${data.contactName}` : '',
+          ]
+            .filter(Boolean)
+            .join(' | ') || undefined,
+        }),
+      });
+
+      const result = await res.json().catch(() => null);
+
+      if (!res.ok || !result?.success) {
+        const errorText =
+          result?.error ||
+          (res.status === 401
+            ? 'Please log in to submit an emergency blood request.'
+            : res.status === 429
+            ? 'Too many requests. Please wait a moment before trying again.'
+            : 'Failed to create emergency request. Please try again.');
+        setErrorMessage(errorText);
+        toast.error(errorText);
+        return;
+      }
+
+      const createdRequestId =
+        result?.data?.request?.requestId ||
+        result?.data?.request?.id ||
+        'Created';
+
+      toast.success(`Emergency request ${createdRequestId} created. Matching donors notified.`);
+      onSuccess(createdRequestId);
+    } catch (err: any) {
+      console.error('Error submitting emergency request:', err);
+      const msg = err?.message || 'Network error submitting request. Please try again.';
+      setErrorMessage(msg);
+      toast.error(msg);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+      {/* Error alert */}
+      {errorMessage && (
+        <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-error">
+          <AlertTriangle size={15} className="text-error flex-shrink-0 mt-0.5" />
+          <p className="text-xs leading-relaxed">{errorMessage}</p>
+        </div>
+      )}
+
       {/* Emergency disclaimer */}
       <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-emergency-bg border border-red-200">
         <AlertTriangle size={15} className="text-emergency flex-shrink-0 mt-0.5" />

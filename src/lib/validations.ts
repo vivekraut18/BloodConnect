@@ -138,3 +138,41 @@ export const createDonationSchema = z.object({
   hospital: z.string().optional(),
   notes: z.string().optional(),
 });
+
+export const RESPONSE_STATUS = ['accepted', 'declined', 'completed', 'cancelled'] as const;
+export type ResponseStatus = (typeof RESPONSE_STATUS)[number];
+
+export const createResponseSchema = z.object({
+  status: z.enum(RESPONSE_STATUS).default('accepted'),
+  notes: z.string().max(500).optional(),
+});
+export type CreateResponseInput = z.infer<typeof createResponseSchema>;
+
+export const updateProfileSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters').optional(),
+  phone: z.string().min(8, 'Phone number must be at least 8 digits').optional(),
+  city: z.string().min(2, 'City is required').optional(),
+  bloodGroup: z.enum(BLOOD_GROUPS).optional(),
+  availabilityStatus: z.enum(DONOR_AVAILABILITY_STATUS).optional(),
+});
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+
+export const NOTIFICATION_TYPES = [
+  'emergency',
+  'request',
+  'donation',
+  'appointment',
+  'info',
+  'system',
+] as const;
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+export const createNotificationSchema = z.object({
+  userId: z.string().uuid().optional(),
+  title: z.string().min(2, 'Title is required'),
+  message: z.string().min(2, 'Message is required'),
+  type: z.enum(NOTIFICATION_TYPES).default('info'),
+  link: z.string().optional(),
+});
+export type CreateNotificationInput = z.infer<typeof createNotificationSchema>;
+

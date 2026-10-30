@@ -1,7 +1,5 @@
 import { NextRequest } from 'next/server';
-import connectDB from '@/lib/db';
-import { User, Donor } from '@/models';
-import { hashPassword } from '@/lib/auth';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { registerSchema, BloodGroup } from '@/lib/validations';
 import { successResponse, errorResponse } from '@/lib/api-response';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -18,8 +16,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    await connectDB();
-
     const body = await req.json().catch(() => null);
     if (!body) {
       return errorResponse('Invalid JSON request body', 400);
@@ -32,40 +28,55 @@ export async function POST(req: NextRequest) {
     }
 
     const { name, email, password, role, city, phone, bloodGroup } = validation.data;
+    const lowerEmail = email.toLowerCase().trim();
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
-      return errorResponse('User with this email already exists', 400);
+    if (role === 'admin') {
+      return errorResponse('Admin accounts cannot be created through registration', 400);
     }
 
-    const passwordHash = await hashPassword(password);
+    const supabaseServer = await createServerSupabase();
 
-    const user = await User.create({
-      name,
-      email: email.toLowerCase(),
-      passwordHash,
-      role,
-      city,
-      phone,
-      verificationStatus: 'verified',
+    // The database signup trigger creates the matching profiles row from this metadata.
+    const { data: authData, error: authError } = await supabaseServer.auth.signUp({
+      email: lowerEmail,
+      password,
+      options: {
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin}/auth/callback`,
+        data: { name, role, phone, city, bloodGroup },
+      },
     });
 
-    if (role === 'donor' || bloodGroup) {
-      await Donor.create({
-        userId: user._id,
-        bloodGroup: (bloodGroup || 'O+') as BloodGroup,
-        availabilityStatus: 'available',
-        lastDonationDate: null,
+    if (authError || !authData.user) {
+      const errMsg = authError?.message || 'Failed to create user account';
+      if (errMsg.includes('already registered') || errMsg.includes('already exists')) {
+        return errorResponse('User with this email already exists', 400);
+      }
+      return errorResponse(errMsg, 400);
+    }
+
+    // Create the donor profile through the authenticated client so RLS remains active.
+    if (authData.session && (role === 'donor' || bloodGroup)) {
+      const { error: donorError } = await supabaseServer.from('donor_profiles').insert({
+        user_id: authData.user.id,
+        blood_group: (bloodGroup || 'O+') as BloodGroup,
+        availability_status: 'available',
       });
+
+      if (donorError) {
+        console.error('Donor profile creation error:', donorError);
+        return errorResponse('Account created but donor profile setup failed', 500);
+      }
     }
 
     return successResponse(
-      { role: user.role },
-      'Registration successful',
+      { role, requiresEmailConfirmation: !authData.session },
+      authData.session
+        ? 'Registration successful'
+        : 'Registration successful. Please confirm your email before signing in.',
       201
     );
-  } catch (error: any) {
+  } catch (error) {
     console.error('Registration error:', error);
-    return errorResponse(error.message || 'Internal server error', 500);
+    return errorResponse('Registration failed. Please try again.', 500);
   }
 }

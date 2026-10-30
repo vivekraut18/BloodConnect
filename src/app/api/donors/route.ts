@@ -1,68 +1,85 @@
 import { NextRequest } from 'next/server';
-import connectDB from '@/lib/db';
-import { Donor, User } from '@/models';
+import { getAuthUser } from '@/lib/auth';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { successResponse, errorResponse } from '@/lib/api-response';
-import { BLOOD_GROUPS, DONOR_AVAILABILITY_STATUS, BloodGroup, DonorAvailabilityStatus } from '@/lib/validations';
+import {
+  BLOOD_GROUPS,
+  DONOR_AVAILABILITY_STATUS,
+  BloodGroup,
+  DonorAvailabilityStatus,
+} from '@/lib/validations';
 
 export async function GET(req: NextRequest) {
   try {
-    await connectDB();
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return errorResponse('Unauthorized: Please log in to view donors', 401);
+    }
 
+    const supabase = await createServerSupabase();
     const { searchParams } = new URL(req.url);
     const bloodGroup = searchParams.get('bloodGroup');
     const city = searchParams.get('city');
     const availability = searchParams.get('availability');
 
-    const donorQuery: Record<string, any> = {};
+    let query = supabase
+      .from('donor_profiles')
+      .select('*, profiles!user_id(name, city, phone, verification_status, email)');
 
     if (bloodGroup && BLOOD_GROUPS.includes(bloodGroup as BloodGroup)) {
-      donorQuery.bloodGroup = bloodGroup;
+      query = query.eq('blood_group', bloodGroup);
     }
 
-    if (availability && DONOR_AVAILABILITY_STATUS.includes(availability as DonorAvailabilityStatus)) {
-      donorQuery.availabilityStatus = availability;
+    if (
+      availability &&
+      DONOR_AVAILABILITY_STATUS.includes(availability as DonorAvailabilityStatus)
+    ) {
+      query = query.eq('availability_status', availability);
     }
 
-    // Populate user and filter by city if needed
-    const donors = await Donor.find(donorQuery)
-      .populate<{ userId: { name: string; city: string; phone: string; verificationStatus: string; email: string } }>({
-        path: 'userId',
-        select: 'name city phone verificationStatus email -_id',
-      })
-      .lean();
+    const { data: donors, error } = await query;
+    if (error) {
+      console.error('Fetch donors db error:', error);
+      return errorResponse('Failed to fetch donors', 500);
+    }
 
-    // If city is specified, filter by populated user city (case-insensitive substring match)
-    let filteredDonors = donors.filter((d) => Boolean(d.userId));
+    let filteredDonors = (donors || []).filter((d: any) => Boolean(d.profiles));
 
     if (city) {
       const cityLower = city.toLowerCase();
       filteredDonors = filteredDonors.filter(
-        (d) => d.userId?.city && d.userId.city.toLowerCase().includes(cityLower)
+        (d: any) => d.profiles?.city && d.profiles.city.toLowerCase().includes(cityLower)
       );
     }
 
-    // Transform to clean frontend-friendly shape
     const formattedDonors = filteredDonors.map((d: any) => {
-      const user = d.userId || {};
+      const user = d.profiles || {};
       const nameParts = (user.name || 'Donor').trim().split(' ');
-      const initials = nameParts.map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+      const initials = nameParts
+        .map((n: string) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2);
       const firstName = nameParts[0] || 'Donor';
+      const year = new Date(d.created_at || Date.now()).getFullYear();
+      const idSuffix = String(d.id).slice(-5).toUpperCase();
 
       return {
-        id: d._id.toString(),
-        bloodConnectId: `BC-${new Date(d.createdAt || Date.now()).getFullYear()}-${d._id.toString().slice(-5).toUpperCase()}`,
+        id: d.id,
+        userId: d.user_id,
+        bloodConnectId: `BC-${year}-${idSuffix}`,
         initials,
         firstName,
         fullName: user.name || 'Anonymous Donor',
-        bloodGroup: d.bloodGroup,
+        bloodGroup: d.blood_group,
         city: user.city || '',
         phone: user.phone || '',
-        availabilityStatus: d.availabilityStatus,
-        isVerified: user.verificationStatus === 'verified',
-        donationsCompleted: d.donationsCompleted || 0,
-        reliabilityScore: d.reliabilityScore || 100,
-        lastDonationDate: d.lastDonationDate || null,
-        createdAt: d.createdAt,
+        availabilityStatus: d.availability_status,
+        isVerified: user.verification_status === 'verified',
+        donationsCompleted: d.donations_completed || 0,
+        reliabilityScore: d.reliability_score || 100,
+        lastDonationDate: d.last_donation_date || null,
+        createdAt: d.created_at,
       };
     });
 

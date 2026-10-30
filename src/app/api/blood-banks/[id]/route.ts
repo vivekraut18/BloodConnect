@@ -1,51 +1,62 @@
 import { NextRequest } from 'next/server';
-import mongoose from 'mongoose';
-import connectDB from '@/lib/db';
-import { BloodBank } from '@/models';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { successResponse, errorResponse } from '@/lib/api-response';
 import { BLOOD_GROUPS } from '@/lib/validations';
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await connectDB();
+    const supabase = await createServerSupabase();
     const { id } = await params;
 
-    if (!mongoose.isValidObjectId(id)) {
-      return errorResponse('Invalid blood bank ID', 400);
-    }
+    const { data: bb, error } = await supabase
+      .from('blood_banks')
+      .select('*, blood_inventory(*)')
+      .eq('id', id)
+      .maybeSingle();
 
-    const bb = await BloodBank.findById(id).lean();
-    if (!bb) {
+    if (error || !bb) {
       return errorResponse('Blood bank not found', 404);
     }
 
-    const stockObj = bb.stock instanceof Map ? Object.fromEntries(bb.stock) : bb.stock || {};
+    const inventoryList = bb.blood_inventory || [];
+    const stockObj: Record<string, { units: number; status: string }> = {};
+
+    BLOOD_GROUPS.forEach((bg) => {
+      const found = inventoryList.find((inv: any) => inv.blood_group === bg);
+      const units = found ? found.units : 0;
+      const status = found
+        ? found.status
+        : units > 5
+          ? 'available'
+          : units > 0
+            ? 'low'
+            : 'out_of_stock';
+      stockObj[bg] = { units, status };
+    });
+
     const inventory = BLOOD_GROUPS.map((bg) => {
-      const item = stockObj[bg] || { units: 0, status: 'out_of_stock' };
+      const item = stockObj[bg];
       return {
         bloodGroup: bg,
-        units: item.units || 0,
-        status: item.status || (item.units > 5 ? 'available' : item.units > 0 ? 'low' : 'out_of_stock'),
-        lastUpdated: item.lastUpdated || (bb as any).updatedAt,
+        units: item.units,
+        status: item.status,
+        lastUpdated: bb.updated_at,
       };
     });
 
     return successResponse(
       {
-        id: (bb as any)._id.toString(),
-        name: (bb as any).name,
-        address: (bb as any).address,
-        city: (bb as any).city,
-        contact: (bb as any).contact,
-        phone: (bb as any).phone || (bb as any).contact,
-        operatingHours: (bb as any).operatingHours || '24/7 Service',
-        isVerified: (bb as any).isVerified ?? true,
+        id: bb.id,
+        name: bb.name,
+        address: bb.address,
+        city: bb.city,
+        contact: bb.contact,
+        phone: bb.phone || bb.contact,
+        operatingHours: bb.operating_hours || '24/7 Service',
+        isVerified: bb.is_verified ?? true,
         stock: stockObj,
         inventory,
-        updatedAt: (bb as any).updatedAt,
+        updatedAt: bb.updated_at,
       },
       'Blood bank fetched successfully',
       200

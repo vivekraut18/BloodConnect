@@ -1,8 +1,6 @@
 import { NextRequest } from 'next/server';
-import mongoose from 'mongoose';
-import connectDB from '@/lib/db';
-import { BloodRequest, User } from '@/models';
 import { getAuthUser } from '@/lib/auth';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import {
   updateRequestStatusSchema,
   isValidStatusTransition,
@@ -10,20 +8,16 @@ import {
 } from '@/lib/validations';
 import { successResponse, errorResponse } from '@/lib/api-response';
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const authUser = await getAuthUser(req);
     if (!authUser) {
       return errorResponse('Unauthorized: Please log in to update request status', 401);
     }
 
-    await connectDB();
     const { id } = await params;
-
     const body = await req.json().catch(() => null);
+
     if (!body) {
       return errorResponse('Invalid JSON body', 400);
     }
@@ -35,14 +29,22 @@ export async function PUT(
     }
 
     const nextStatus = validation.data.status as RequestStatus;
+    const supabase = await createServerSupabase();
 
-    // Find request by ObjectId or requestId string (e.g. BL-2026-XXXXX)
-    let bloodRequest = null;
-    if (mongoose.isValidObjectId(id)) {
-      bloodRequest = await BloodRequest.findById(id);
-    }
+    // Query request by UUID or request_id string
+    let { data: bloodRequest } = await supabase
+      .from('blood_requests')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
     if (!bloodRequest) {
-      bloodRequest = await BloodRequest.findOne({ requestId: id });
+      const { data: requestByRequestId } = await supabase
+        .from('blood_requests')
+        .select('*')
+        .eq('request_id', id)
+        .maybeSingle();
+      bloodRequest = requestByRequestId;
     }
 
     if (!bloodRequest) {
@@ -65,11 +67,16 @@ export async function PUT(
     if (authUser.role === 'admin') {
       isAuthorized = true;
     } else if (authUser.role === 'hospital') {
-      const hospitalUser = await User.findById(authUser.userId).lean();
+      const { data: hospitalUser } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', authUser.userId)
+        .maybeSingle();
+
       const hospitalName = hospitalUser?.name?.trim().toLowerCase();
       const requestHospital = (bloodRequest.hospital || '').trim().toLowerCase();
       const isAssignedHospital = Boolean(hospitalName && requestHospital === hospitalName);
-      const isHospitalRequester = bloodRequest.requesterId?.toString() === authUser.userId;
+      const isHospitalRequester = bloodRequest.requester_id === authUser.userId;
 
       if (isAssignedHospital || isHospitalRequester) {
         const hospitalAllowedStatuses: RequestStatus[] = [
@@ -85,28 +92,56 @@ export async function PUT(
       }
     } else if (authUser.role === 'requester') {
       // Requesters may ONLY cancel their own requests
-      const isOwner = bloodRequest.requesterId?.toString() === authUser.userId;
+      const isOwner = bloodRequest.requester_id === authUser.userId;
       if (isOwner && nextStatus === 'CANCELLED') {
         isAuthorized = true;
       }
     } else if (authUser.role === 'donor') {
-      // Donors cannot directly transition parent request status
       isAuthorized = false;
     }
 
     if (!isAuthorized) {
       console.warn(
-        `[SECURITY] Unauthorized status transition attempt: User ${authUser.userId} (role: ${authUser.role}) attempted transition of request ${bloodRequest.requestId || bloodRequest._id} from ${currentStatus} to ${nextStatus}`
+        `[SECURITY] Unauthorized status transition attempt: User ${authUser.userId} (role: ${authUser.role}) attempted transition of request ${bloodRequest.request_id || bloodRequest.id} from ${currentStatus} to ${nextStatus}`
       );
-      return errorResponse('Forbidden: You are not authorized to perform this status transition', 403);
+      return errorResponse(
+        'Forbidden: You are not authorized to perform this status transition',
+        403
+      );
     }
 
-    bloodRequest.status = nextStatus;
-    bloodRequest.updatedAt = new Date();
-    await bloodRequest.save();
+    const { data: updatedRequest, error: updateErr } = await supabase
+      .from('blood_requests')
+      .update({
+        status: nextStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', bloodRequest.id)
+      .select()
+      .single();
+
+    if (updateErr || !updatedRequest) {
+      console.error('Update request status error:', updateErr);
+      return errorResponse('Failed to update request status', 500);
+    }
 
     return successResponse(
-      bloodRequest,
+      {
+        id: updatedRequest.id,
+        requestId: updatedRequest.request_id,
+        requesterId: updatedRequest.requester_id,
+        bloodGroup: updatedRequest.blood_group,
+        priority: updatedRequest.priority,
+        status: updatedRequest.status,
+        hospital: updatedRequest.hospital,
+        unitsNeeded: updatedRequest.units_needed,
+        contactNumber: updatedRequest.contact_number,
+        patientName: updatedRequest.patient_name,
+        city: updatedRequest.city,
+        notes: updatedRequest.notes,
+        createdAt: updatedRequest.created_at,
+        updatedAt: updatedRequest.updated_at,
+      },
       `Request status transitioned to ${nextStatus}`,
       200
     );

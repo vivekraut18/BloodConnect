@@ -35,7 +35,11 @@ interface RegisterFormProps {
 const ROLE_OPTIONS: { value: UserRole; label: string; description: string }[] = [
   { value: 'donor', label: 'Blood Donor', description: 'Donate blood and respond to requests' },
   { value: 'requester', label: 'Patient / Family', description: 'Find blood for a patient' },
-  { value: 'hospital', label: 'Hospital / Blood Bank', description: 'Manage inventory and requests' },
+  {
+    value: 'hospital',
+    label: 'Hospital / Blood Bank',
+    description: 'Manage inventory and requests',
+  },
 ];
 
 export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
@@ -48,10 +52,10 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
     register,
     handleSubmit,
     watch,
-    setValue,
     formState: { errors },
   } = useForm<RegisterFormData>({
     defaultValues: { role: 'donor', consentMedical: false, consentTerms: false },
+    shouldUnregister: false,
   });
 
   const selectedRole = watch('role');
@@ -59,12 +63,42 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 
   const onSubmit = async (_data: RegisterFormData) => {
     setIsLoading(true);
-    // BACKEND INTEGRATION: POST /api/auth/register — Argon2id hashing server-side, rate limited
-    await new Promise((r) => setTimeout(r, 1400));
-    toast.success('Account created! Please verify your email to continue.');
-    setIsLoading(false);
-    if (_data.role === 'donor') router.push('/donor-dashboard');
-    else router.push('/find-blood-search');
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: _data.fullName,
+          email: _data.email,
+          password: _data.password,
+          role: _data.role,
+          city: _data.city || 'Mumbai',
+          phone: _data.phone,
+          bloodGroup: _data.bloodGroup,
+        }),
+      });
+
+      const result = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        setIsLoading(false);
+        toast.error(result?.message || 'Registration failed');
+        return;
+      }
+
+      toast.success('Account created successfully!');
+      setIsLoading(false);
+      if (result?.data?.requiresEmailConfirmation) {
+        toast.info('Please confirm your email before signing in.');
+        onSwitchToLogin();
+        return;
+      }
+      if (_data.role === 'donor') router.push('/donor-dashboard');
+      else router.push('/find-blood-search');
+    } catch {
+      setIsLoading(false);
+      toast.error('Registration failed. Please try again.');
+    }
   };
 
   return (
@@ -76,14 +110,17 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 
       {/* Role selector */}
       <div className="mb-5">
-        <label className="block text-sm font-semibold text-foreground mb-2">I am registering as</label>
+        <label className="block text-sm font-semibold text-foreground mb-2">
+          I am registering as
+        </label>
         <div className="grid grid-cols-1 gap-2">
           {ROLE_OPTIONS.map((opt) => (
             <label
               key={`role-opt-${opt.value}`}
               className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all duration-150 ${
                 selectedRole === opt.value
-                  ? 'border-primary bg-primary-light' :'border-border hover:border-primary/40 bg-card'
+                  ? 'border-primary bg-primary-light'
+                  : 'border-border hover:border-primary/40 bg-card'
               }`}
             >
               <input
@@ -93,7 +130,9 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
                 {...register('role')}
               />
               <div>
-                <p className={`text-sm font-semibold ${selectedRole === opt.value ? 'text-primary' : 'text-foreground'}`}>
+                <p
+                  className={`text-sm font-semibold ${selectedRole === opt.value ? 'text-primary' : 'text-foreground'}`}
+                >
                   {opt.label}
                 </p>
                 <p className="text-xs text-muted-foreground">{opt.description}</p>
@@ -164,7 +203,9 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
         <p className="text-xs text-muted-foreground mb-1.5">
           Used only for urgent donation alerts. Never shown publicly.
         </p>
-        <div className={`flex items-center rounded-xl border bg-background overflow-hidden ${errors.phone ? 'border-error' : 'border-border'} focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary transition-all`}>
+        <div
+          className={`flex items-center rounded-xl border bg-background overflow-hidden ${errors.phone ? 'border-error' : 'border-border'} focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary transition-all`}
+        >
           <span className="px-3 py-2.5 text-sm font-semibold text-muted-foreground border-r border-border bg-muted/40 flex-shrink-0 select-none">
             +91
           </span>
@@ -175,7 +216,10 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
             className="flex-1 px-3 py-2.5 text-sm bg-transparent outline-none border-none"
             {...register('phone', {
               required: 'Mobile number is required',
-              pattern: { value: /^[6-9]\d{9}$/, message: 'Enter a valid 10-digit Indian mobile number' },
+              pattern: {
+                value: /^[6-9]\d{9}$/,
+                message: 'Enter a valid 10-digit Indian mobile number',
+              },
             })}
           />
         </div>
@@ -195,7 +239,10 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
           </p>
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
-              <label htmlFor="reg-blood-group" className="block text-sm font-semibold text-foreground mb-1.5">
+              <label
+                htmlFor="reg-blood-group"
+                className="block text-sm font-semibold text-foreground mb-1.5"
+              >
                 Blood Group <span className="text-error">*</span>
               </label>
               <select
@@ -205,7 +252,9 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
               >
                 <option value="">Select</option>
                 {BLOOD_GROUPS.map((bg) => (
-                  <option key={`bg-opt-${bg}`} value={bg}>{bg}</option>
+                  <option key={`bg-opt-${bg}`} value={bg}>
+                    {bg}
+                  </option>
                 ))}
               </select>
               {errors.bloodGroup && (
@@ -216,7 +265,10 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
               )}
             </div>
             <div>
-              <label htmlFor="reg-dob" className="block text-sm font-semibold text-foreground mb-1.5">
+              <label
+                htmlFor="reg-dob"
+                className="block text-sm font-semibold text-foreground mb-1.5"
+              >
                 Date of Birth <span className="text-error">*</span>
               </label>
               <input
@@ -228,7 +280,10 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
             </div>
           </div>
           <div>
-            <label htmlFor="reg-city" className="block text-sm font-semibold text-foreground mb-1.5">
+            <label
+              htmlFor="reg-city"
+              className="block text-sm font-semibold text-foreground mb-1.5"
+            >
               City / District
             </label>
             <input
@@ -249,7 +304,10 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
             Institution Details
           </p>
           <div className="mb-3">
-            <label htmlFor="reg-hospital-name" className="block text-sm font-semibold text-foreground mb-1.5">
+            <label
+              htmlFor="reg-hospital-name"
+              className="block text-sm font-semibold text-foreground mb-1.5"
+            >
               Institution Name <span className="text-error">*</span>
             </label>
             <input
@@ -262,7 +320,10 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="reg-hospital-type" className="block text-sm font-semibold text-foreground mb-1.5">
+              <label
+                htmlFor="reg-hospital-type"
+                className="block text-sm font-semibold text-foreground mb-1.5"
+              >
                 Type <span className="text-error">*</span>
               </label>
               <select
@@ -272,12 +333,17 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
               >
                 <option value="">Select type</option>
                 {HOSPITAL_TYPES.map((ht) => (
-                  <option key={`ht-${ht}`} value={ht}>{ht}</option>
+                  <option key={`ht-${ht}`} value={ht}>
+                    {ht}
+                  </option>
                 ))}
               </select>
             </div>
             <div>
-              <label htmlFor="reg-reg-number" className="block text-sm font-semibold text-foreground mb-1.5">
+              <label
+                htmlFor="reg-reg-number"
+                className="block text-sm font-semibold text-foreground mb-1.5"
+              >
                 Reg. Number <span className="text-error">*</span>
               </label>
               <input
@@ -294,7 +360,10 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 
       {/* Password */}
       <div className="mb-4">
-        <label htmlFor="reg-password" className="block text-sm font-semibold text-foreground mb-1.5">
+        <label
+          htmlFor="reg-password"
+          className="block text-sm font-semibold text-foreground mb-1.5"
+        >
           Password
         </label>
         <p className="text-xs text-muted-foreground mb-1.5">
@@ -373,10 +442,14 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
           <input
             type="checkbox"
             className="mt-0.5 accent-warning w-4 h-4"
-            {...register('consentMedical', { required: 'You must acknowledge the medical disclaimer' })}
+            {...register('consentMedical', {
+              required: 'You must acknowledge the medical disclaimer',
+            })}
           />
           <span className="text-xs text-warning leading-relaxed">
-            <strong>Medical Disclaimer:</strong> I understand that BloodConnect is a coordination platform only and does not replace medical advice. All blood compatibility and eligibility decisions must be made by qualified hospital or blood bank staff.
+            <strong>Medical Disclaimer:</strong> I understand that BloodConnect is a coordination
+            platform only and does not replace medical advice. All blood compatibility and
+            eligibility decisions must be made by qualified hospital or blood bank staff.
           </span>
         </label>
         {errors.consentMedical && (
@@ -397,10 +470,15 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
           />
           <span className="text-xs text-muted-foreground leading-relaxed">
             I agree to the{' '}
-            <button type="button" className="text-primary font-semibold hover:underline">Terms of Service</button>
-            {' '}and{' '}
-            <button type="button" className="text-primary font-semibold hover:underline">Privacy Policy</button>.
-            BloodConnect will never sell or share your personal data. No cash-for-blood arrangements are permitted on this platform.
+            <button type="button" className="text-primary font-semibold hover:underline">
+              Terms of Service
+            </button>{' '}
+            and{' '}
+            <button type="button" className="text-primary font-semibold hover:underline">
+              Privacy Policy
+            </button>
+            . BloodConnect will never sell or share your personal data. No cash-for-blood
+            arrangements are permitted on this platform.
           </span>
         </label>
         {errors.consentTerms && (
@@ -432,7 +510,11 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 
       <p className="text-center text-sm text-muted-foreground mt-4">
         Already have an account?{' '}
-        <button type="button" onClick={onSwitchToLogin} className="text-primary font-semibold hover:underline">
+        <button
+          type="button"
+          onClick={onSwitchToLogin}
+          className="text-primary font-semibold hover:underline"
+        >
           Sign in
         </button>
       </p>

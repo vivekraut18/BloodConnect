@@ -58,17 +58,22 @@ export default function AuthPage() {
               </span>
             </div>
             <h1 className="text-3xl xl:text-4xl font-extrabold text-white leading-tight mt-3 mb-4">
-              Every second counts.<br />
+              Every second counts.
+              <br />
               <span className="text-emergency">Find blood fast.</span>
             </h1>
             <p className="text-sm text-slate-400 leading-relaxed max-w-xs">
-              Connecting verified donors, hospitals, and blood banks across India for emergency blood coordination — with full transparency and no cash-for-blood.
+              Connecting verified donors, hospitals, and blood banks across India for emergency
+              blood coordination — with full transparency and no cash-for-blood.
             </p>
 
             {/* Stats */}
             <div className="grid grid-cols-2 gap-3 mt-8">
               {BRAND_STATS.map((stat) => (
-                <div key={`brand-stat-${stat.label}`} className="bg-white/5 border border-white/10 rounded-xl p-4">
+                <div
+                  key={`brand-stat-${stat.label}`}
+                  className="bg-white/5 border border-white/10 rounded-xl p-4"
+                >
                   <p className="text-2xl font-extrabold text-white font-tabular">{stat.value}</p>
                   <p className="text-xs text-slate-400 mt-0.5">{stat.label}</p>
                 </div>
@@ -79,7 +84,10 @@ export default function AuthPage() {
           {/* Trust badges */}
           <div className="flex flex-wrap gap-2 mt-6">
             {TRUST_BADGES.map((badge) => (
-              <div key={`trust-${badge.label}`} className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5">
+              <div
+                key={`trust-${badge.label}`}
+                className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5"
+              >
                 <badge.Icon size={13} className="text-slate-400" />
                 <span className="text-xs text-slate-400">{badge.label}</span>
               </div>
@@ -91,7 +99,8 @@ export default function AuthPage() {
             <div className="flex items-start gap-2">
               <AlertTriangle size={13} className="text-warning flex-shrink-0 mt-0.5" />
               <p className="text-xs text-slate-400 leading-relaxed">
-                BloodConnect is a coordination tool only. All medical decisions must be made by qualified hospital or blood bank staff.
+                BloodConnect is a coordination tool only. All medical decisions must be made by
+                qualified hospital or blood bank staff.
               </p>
             </div>
           </div>

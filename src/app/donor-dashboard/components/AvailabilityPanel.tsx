@@ -1,8 +1,9 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckCircle, Clock, BellOff, ChevronDown, AlertTriangle } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import { DonorAvailabilityStatus } from '@/lib/constants';
+import { useProfile } from '@/components/ProfileContext';
 import { toast } from 'sonner';
 
 const STATUS_OPTIONS: {
@@ -40,11 +41,21 @@ const STATUS_OPTIONS: {
 ];
 
 export default function AvailabilityPanel() {
-  const [status, setStatus] = useState<DonorAvailabilityStatus>('available');
+  const { profile, refreshProfile } = useProfile();
+  const [status, setStatus] = useState<DonorAvailabilityStatus>(
+    (profile?.availabilityStatus as DonorAvailabilityStatus) || 'available'
+  );
   const [pendingStatus, setPendingStatus] = useState<DonorAvailabilityStatus | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  const currentOpt = STATUS_OPTIONS.find((o) => o.value === status)!;
+  useEffect(() => {
+    if (profile?.availabilityStatus) {
+      setStatus(profile.availabilityStatus as DonorAvailabilityStatus);
+    }
+  }, [profile?.availabilityStatus]);
+
+  const currentOpt = STATUS_OPTIONS.find((o) => o.value === status) || STATUS_OPTIONS[0];
 
   const handleStatusChange = (newStatus: DonorAvailabilityStatus) => {
     setDropdownOpen(false);
@@ -54,12 +65,30 @@ export default function AvailabilityPanel() {
 
   const confirmChange = async () => {
     if (!pendingStatus) return;
-    // BACKEND INTEGRATION: PUT /api/donors/me/availability { status: pendingStatus }
-    await new Promise((r) => setTimeout(r, 600));
-    setStatus(pendingStatus);
-    setPendingStatus(null);
-    const opt = STATUS_OPTIONS.find((o) => o.value === pendingStatus)!;
-    toast.success(`Availability updated to "${opt.label}"`);
+    setIsUpdating(true);
+
+    try {
+      const res = await fetch('/api/donors/availability', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: pendingStatus }),
+      });
+
+      if (res.ok) {
+        setStatus(pendingStatus);
+        await refreshProfile();
+        const opt = STATUS_OPTIONS.find((o) => o.value === pendingStatus)!;
+        toast.success(`Availability updated to "${opt.label}"`);
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error || 'Failed to update availability status.');
+      }
+    } catch (err) {
+      toast.error('Network error updating status.');
+    } finally {
+      setIsUpdating(false);
+      setPendingStatus(null);
+    }
   };
 
   const pendingOpt = pendingStatus ? STATUS_OPTIONS.find((o) => o.value === pendingStatus) : null;
@@ -69,7 +98,7 @@ export default function AvailabilityPanel() {
       <div className="bg-card border border-border rounded-2xl p-5">
         <h3 className="text-sm font-bold text-foreground mb-3">Availability Status</h3>
         <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-          Your availability is shown to requesters searching for donors. Update this whenever your status changes. Your exact location is never shared.
+          Your availability status is shown to verified requesters searching for donors. Update this whenever your status changes.
         </p>
 
         {/* Current status */}
@@ -77,8 +106,11 @@ export default function AvailabilityPanel() {
           <button
             onClick={() => setDropdownOpen((p) => !p)}
             className={`w-full flex items-center justify-between gap-3 p-3.5 rounded-xl border-2 transition-all duration-150 ${
-              status === 'available' ?'border-green-200 bg-success-bg'
-                : status === 'temporarily_unavailable' ?'border-amber-200 bg-warning-bg' :'border-border bg-muted'
+              status === 'available'
+                ? 'border-green-200 bg-success-bg'
+                : status === 'temporarily_unavailable'
+                ? 'border-amber-200 bg-warning-bg'
+                : 'border-border bg-muted'
             }`}
             aria-expanded={dropdownOpen}
             aria-haspopup="listbox"
@@ -122,17 +154,6 @@ export default function AvailabilityPanel() {
             </div>
           )}
         </div>
-
-        {/* Next eligible */}
-        <div className="mt-3 p-3 rounded-xl bg-error-bg border border-red-200">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={13} className="text-critical flex-shrink-0" />
-            <p className="text-xs text-critical font-semibold">Not yet eligible to donate</p>
-          </div>
-          <p className="text-xs text-critical mt-1 ml-5">
-            Next eligible: <strong>10 Dec 2026</strong> (88 days remaining). Last donation: 10 Sep 2026.
-          </p>
-        </div>
       </div>
 
       {/* Confirm modal */}
@@ -152,7 +173,7 @@ export default function AvailabilityPanel() {
             <div className="flex items-start gap-2 p-3 rounded-xl bg-warning-bg border border-amber-200">
               <AlertTriangle size={14} className="text-warning flex-shrink-0 mt-0.5" />
               <p className="text-xs text-warning leading-relaxed">
-                Do Not Disturb will stop all donation request notifications, including urgent ones. Emergency alerts will still be delivered.
+                Do Not Disturb will stop non-emergency request notifications.
               </p>
             </div>
           )}
@@ -165,9 +186,10 @@ export default function AvailabilityPanel() {
             </button>
             <button
               onClick={confirmChange}
-              className="flex-1 btn-primary py-2.5 rounded-xl text-sm font-semibold"
+              disabled={isUpdating}
+              className="flex-1 btn-primary py-2.5 rounded-xl text-sm font-semibold disabled:opacity-60"
             >
-              Confirm Change
+              {isUpdating ? 'Updating…' : 'Confirm Change'}
             </button>
           </div>
         </div>
